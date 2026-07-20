@@ -2,6 +2,7 @@ tmp/
 components/
 managed_components/
 build/
+build*/
 dist/
 .vscode/
 .devcontainer/
@@ -9,6 +10,12 @@ sdkconfig.old
 sdkconfig
 dependencies.lock
 .env
+**/.env
+**/.venv/
+**/__pycache__/
+**/.pytest_cache/
+**/data/
+**/dist/
 releases/
 main/assets/lang_config.h
 main/mmap_generate_emoji.h
@@ -18,3 +25,4 @@ main/mmap_generate_emoji.h
 *.bin
 mmap_generate_*.h
 .clangd
+docs/~$*
