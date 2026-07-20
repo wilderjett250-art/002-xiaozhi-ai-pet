@@ -1,0 +1,556 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>喵伴云管</title>
+  <link rel="icon" type="image/png" href="favicon.png">
+  <script src="vendor/lucide.min.js"></script>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f7;
+      --surface: #ffffff;
+      --ink: #20282d;
+      --muted: #68767d;
+      --line: #dce3e6;
+      --teal: #147d75;
+      --teal-soft: #e5f4f1;
+      --pink: #ca5577;
+      --pink-soft: #fae9ee;
+      --amber: #a26112;
+      --danger: #b83c46;
+      --shadow: 0 6px 20px rgba(28, 45, 52, .08);
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 "Microsoft YaHei", system-ui, sans-serif; }
+    button, input, select { font: inherit; }
+    button { border: 0; cursor: pointer; }
+    .topbar { min-height: 62px; background: #273238; color: #fff; display: flex; align-items: center; padding: 0 28px; gap: 16px; }
+    .brand { font-size: 21px; font-weight: 700; }
+    .brand small { margin-left: 10px; color: #b9c8cd; font-size: 12px; font-weight: 400; }
+    .auth { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .auth input { width: 260px; height: 34px; border: 1px solid #56646a; background: #1d272c; color: #fff; padding: 0 10px; border-radius: 4px; }
+    .icon-button, .command-button, .secondary-button, .danger-button { height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; border-radius: 4px; padding: 0 12px; }
+    .icon-button { width: 34px; padding: 0; background: #435158; color: #fff; }
+    .command-button { background: var(--teal); color: #fff; }
+    .command-button:disabled { background: #9badb0; cursor: not-allowed; }
+    .secondary-button { background: var(--teal-soft); color: #0d625c; }
+    .danger-button { background: #f8e6e8; color: var(--danger); }
+    .icon-button svg, button svg { width: 17px; height: 17px; }
+    .actions { display: flex; gap: 7px; }
+    .tabs { background: var(--surface); border-bottom: 1px solid var(--line); padding: 0 28px; display: flex; gap: 24px; }
+    .tab { height: 46px; background: transparent; color: var(--muted); border-bottom: 3px solid transparent; padding: 0 4px; }
+    .tab.active { color: var(--teal); border-color: var(--teal); font-weight: 700; }
+    main { max-width: 1380px; margin: 0 auto; padding: 24px 28px 40px; }
+    .view { display: none; }
+    .view.active { display: block; }
+    .view-head { display: flex; align-items: end; justify-content: space-between; margin-bottom: 14px; gap: 16px; }
+    h1 { font-size: 20px; margin: 0; }
+    .summary { color: var(--muted); overflow-wrap: anywhere; }
+    .table-wrap { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 850px; }
+    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+    th { background: #f8fafb; color: #526168; font-size: 12px; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .status { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; }
+    .status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #9aa7ac; }
+    .status.online { color: var(--teal); }
+    .status.online::before { background: #21a28e; box-shadow: 0 0 0 3px #dff4ee; }
+    .network-policy { display: grid; gap: 2px; }
+    .network-policy strong { font-weight: 700; }
+    .role { display: inline-block; min-width: 50px; padding: 2px 7px; border-radius: 3px; font-size: 12px; text-align: center; }
+    .role.user { background: var(--teal-soft); color: #0f6b64; }
+    .role.assistant { background: var(--pink-soft); color: #9c3e5a; }
+    .event-status { display: inline-block; min-width: 58px; padding: 2px 7px; border-radius: 3px; font-size: 12px; text-align: center; background: #edf1f2; color: #56666d; }
+    .event-status.responded { background: var(--teal-soft); color: #0f6b64; }
+    .event-status.failed { background: #f8e6e8; color: var(--danger); }
+    .ambient-state { color: var(--muted); font-weight: 700; }
+    .ambient-state.on { color: var(--teal); }
+    .content-cell { white-space: normal; min-width: 360px; }
+    .debug-cell { white-space: normal; min-width: 250px; }
+    .debug-section { border-top: 1px solid var(--line); padding-top: 13px; display: grid; gap: 12px; }
+    .debug-warning { color: var(--amber); font-size: 12px; }
+    .debug-storage-row button { flex: 0 0 auto; white-space: nowrap; }
+    .audio-actions { display: flex; gap: 6px; flex-wrap: wrap; min-width: 230px; }
+    .audio-actions button { height: 30px; padding: 0 9px; }
+    .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px; }
+    .photo { background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 6px; overflow: hidden; }
+    .photo img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block; background: #e8edef; }
+    .photo-body { padding: 11px 12px 12px; }
+    .photo-meta { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; gap: 8px; }
+    .photo-analysis { min-height: 42px; margin: 8px 0 10px; }
+    .source { color: var(--pink); font-weight: 700; }
+    .empty { padding: 48px 20px; text-align: center; color: var(--muted); background: var(--surface); border: 1px dashed #bdc9ce; }
+    .filters { display: flex; gap: 8px; }
+    select { height: 34px; min-width: 220px; border: 1px solid var(--line); border-radius: 4px; background: #fff; padding: 0 9px; color: var(--ink); }
+    .toast { position: fixed; right: 22px; bottom: 22px; background: #273238; color: #fff; padding: 10px 14px; border-radius: 5px; box-shadow: var(--shadow); opacity: 0; transform: translateY(8px); pointer-events: none; transition: .2s; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    dialog { width: min(460px, calc(100vw - 28px)); border: 1px solid var(--line); border-radius: 6px; padding: 0; box-shadow: 0 18px 60px rgba(20, 35, 42, .24); }
+    #ambient-dialog { width: min(620px, calc(100vw - 28px)); }
+    dialog::backdrop { background: rgba(22, 31, 35, .48); }
+    .dialog-head { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--line); }
+    .dialog-head h2 { margin: 0; font-size: 17px; }
+    .dialog-body { padding: 16px; display: grid; gap: 13px; min-width: 0; overflow: hidden; }
+    .field { display: grid; gap: 6px; min-width: 0; }
+    .field label { color: var(--muted); font-size: 12px; font-weight: 700; }
+    .field input { width: 100%; height: 38px; border: 1px solid var(--line); border-radius: 4px; padding: 0 10px; color: var(--ink); background: #fff; }
+    .field input[type=file] { height: auto; padding: 8px; }
+    .check-field { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+    .check-field > div { min-width: 0; }
+    .check-field input { width: 19px; height: 19px; accent-color: var(--teal); }
+    .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; min-width: 0; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+    @media (max-width: 760px) {
+      .topbar { align-items: flex-start; padding: 14px 16px; flex-wrap: wrap; }
+      .brand { width: 100%; }
+      .auth { width: 100%; margin-left: 0; }
+      .auth input { min-width: 0; flex: 1; }
+      .tabs { padding: 0 16px; }
+      main { padding: 18px 14px 30px; }
+      .view-head { align-items: flex-start; flex-direction: column; }
+      .filters { width: 100%; }
+      select { width: 100%; min-width: 0; }
+      .field-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">喵伴云管<small>设备、对话与影像</small></div>
+    <div class="auth">
+      <input id="token" type="password" autocomplete="current-password" aria-label="管理令牌" placeholder="输入管理令牌">
+      <button class="icon-button" id="save-token" title="连接后台" aria-label="连接后台"><i data-lucide="log-in"></i></button>
+      <button class="icon-button" id="refresh" title="刷新数据" aria-label="刷新数据"><i data-lucide="refresh-cw"></i></button>
+    </div>
+  </header>
+
+  <nav class="tabs" aria-label="管理视图">
+    <button class="tab active" data-view="devices">设备</button>
+    <button class="tab" data-view="chats">对话</button>
+    <button class="tab" data-view="photos">照片</button>
+    <button class="tab" data-view="ambient">主动互动</button>
+  </nav>
+
+  <main>
+    <section class="view active" id="devices-view">
+      <div class="view-head"><div><h1>在线设备</h1><div class="summary" id="device-summary">等待连接</div></div></div>
+      <div class="table-wrap" id="device-table"></div>
+    </section>
+
+    <section class="view" id="chats-view">
+      <div class="view-head">
+        <div><h1>聊天记录</h1><div class="summary">按设备查看用户与桌宠的文本对话</div></div>
+        <div class="filters"><select id="chat-device" aria-label="筛选设备"></select></div>
+      </div>
+      <div class="table-wrap" id="chat-table"></div>
+    </section>
+
+    <section class="view" id="photos-view">
+      <div class="view-head">
+        <div><h1>照片库</h1><div class="summary">仅保存语音明确拍照与后台手动拍照</div></div>
+        <div class="filters"><select id="photo-device" aria-label="筛选设备"></select></div>
+      </div>
+      <div class="gallery" id="photo-gallery"></div>
+    </section>
+
+    <section class="view" id="ambient-view">
+      <div class="view-head">
+        <div><h1>主动互动记录</h1><div class="summary" id="ambient-summary">等待语音引擎状态</div></div>
+        <div class="filters"><select id="ambient-device" aria-label="筛选设备"></select></div>
+      </div>
+      <div class="table-wrap" id="ambient-table"></div>
+    </section>
+  </main>
+  <div class="toast" id="toast" role="status"></div>
+  <dialog id="ota-dialog">
+    <div class="dialog-head"><h2>远程固件升级</h2><button class="icon-button" id="close-ota" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+    <form class="dialog-body" id="ota-form">
+      <input type="hidden" id="ota-device-id">
+      <div class="field"><label for="ota-version">版本号</label><input id="ota-version" maxlength="64" required placeholder="例如 2.1.0-cat"></div>
+      <div class="field"><label for="ota-file">应用固件</label><input id="ota-file" type="file" accept=".bin,application/octet-stream" required></div>
+      <div class="summary" id="ota-status">等待选择固件</div>
+      <div class="dialog-actions"><button type="button" class="secondary-button" id="cancel-ota">取消</button><button type="submit" class="command-button" id="submit-ota"><i data-lucide="upload-cloud"></i>上传并升级</button></div>
+    </form>
+  </dialog>
+  <dialog id="ambient-dialog">
+    <div class="dialog-head"><h2>主动聆听设置</h2><button class="icon-button" id="close-ambient" title="关闭" aria-label="关闭"><i data-lucide="x"></i></button></div>
+    <form class="dialog-body" id="ambient-form">
+      <input type="hidden" id="ambient-device-id">
+      <div class="check-field"><div><strong>启用主动聆听</strong><div class="summary">仅上传本地 VAD 判断为人声的短片段</div></div><input id="ambient-enabled" type="checkbox"></div>
+      <div class="field-grid">
+        <div class="field"><label for="ambient-cooldown">互动冷却（秒）</label><input id="ambient-cooldown" type="number" min="30" max="3600" required></div>
+        <div class="field"><label for="ambient-hourly">每小时最多回应</label><input id="ambient-hourly" type="number" min="1" max="20" required></div>
+        <div class="field"><label for="ambient-quiet-start">安静时段开始</label><input id="ambient-quiet-start" type="time" required></div>
+        <div class="field"><label for="ambient-quiet-end">安静时段结束</label><input id="ambient-quiet-end" type="time" required></div>
+      </div>
+      <div class="debug-section">
+        <div class="check-field"><div><strong>保存调试音频</strong><div class="debug-warning">仅保存设备 VAD 截取的人声短片段，建议只在排查期间开启</div></div><input id="ambient-debug-audio" type="checkbox"></div>
+        <div class="field-grid">
+          <div class="field"><label for="ambient-debug-retention">保留天数</label><input id="ambient-debug-retention" type="number" min="1" max="30" required></div>
+          <div class="field"><label for="ambient-debug-max-mb">容量上限（MB）</label><input id="ambient-debug-max-mb" type="number" min="20" max="2048" required></div>
+        </div>
+        <div class="check-field debug-storage-row"><div class="summary" id="ambient-debug-storage">正在读取调试音频用量</div><button type="button" class="danger-button" id="clear-ambient-audio"><i data-lucide="eraser"></i>清空音频</button></div>
+      </div>
+      <div class="summary" id="ambient-engine">正在读取语音引擎状态</div>
+      <div class="dialog-actions"><button type="button" class="secondary-button" id="cancel-ambient">取消</button><button type="submit" class="command-button"><i data-lucide="save"></i>保存</button></div>
+    </form>
+  </dialog>
+
+  <script>
+    const state = { token: sessionStorage.getItem('petCloudToken') || '', devices: [], photoUrls: [], activeAudio: null, activeAudioUrl: '' };
+    const tokenInput = document.querySelector('#token');
+    tokenInput.value = state.token;
+
+    const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[char]));
+    const formatTime = value => value ? new Date(value).toLocaleString('zh-CN', {
+      hour12: false, timeZoneName: 'short'
+    }) : '-';
+    const networkName = value => value === '4g' ? '4G' : value === 'wifi' ? 'Wi-Fi' : (value || '-');
+    const networkPolicy = device => {
+      const active = networkName(device.network);
+      const primary = networkName(device.network_primary);
+      const standby = networkName(device.network_standby);
+      const mode = device.automatic_failover ? '自动切换' : '手动切换';
+      return `<div class="network-policy"><strong>当前 ${escapeHtml(active)}</strong><span class="summary">主 ${escapeHtml(primary)} · 备 ${escapeHtml(standby)} · ${mode}</span></div>`;
+    };
+    const relativeUrl = path => path.replace(/^\/+/, '');
+    const renderIcons = () => window.lucide?.createIcons();
+    const api = async (path, options = {}) => {
+      const response = await fetch(relativeUrl(path), { ...options, headers: { 'X-Admin-Token': state.token, ...(options.headers || {}) } });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.detail || `请求失败 ${response.status}`);
+      return payload;
+    };
+    let toastTimer;
+    const toast = message => {
+      const element = document.querySelector('#toast');
+      element.textContent = message;
+      element.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => element.classList.remove('show'), 2200);
+    };
+    const empty = message => `<div class="empty">${escapeHtml(message)}</div>`;
+
+    async function loadDevices() {
+      const payload = await api('/api/v1/admin/devices');
+      state.devices = payload.devices;
+      const online = state.devices.filter(device => device.online).length;
+      document.querySelector('#device-summary').textContent = `${online} 台在线 / ${state.devices.length} 台设备`;
+      document.querySelector('#device-table').innerHTML = state.devices.length ? `
+        <table><thead><tr><th>状态</th><th>设备</th><th>网络</th><th>主动聆听</th><th>固件</th><th>最近在线</th><th>对话</th><th>照片</th><th>操作</th></tr></thead>
+        <tbody>${state.devices.map(device => `<tr>
+          <td><span class="status ${device.online ? 'online' : ''}">${device.online ? '在线' : '离线'}</span></td>
+          <td><strong>${escapeHtml(device.name)}</strong><br><span class="summary">${escapeHtml(device.device_id)}</span></td>
+          <td>${networkPolicy(device)}</td><td><span class="ambient-state ${device.ambient_server_enabled ? 'on' : ''}">${device.ambient_server_enabled ? '已开启' : '已关闭'}</span><br><span class="summary">${device.ambient_event_count || 0} 条记录</span></td><td>${escapeHtml(device.firmware || '-')}</td>
+          <td>${formatTime(device.last_seen_ms)}</td><td>${device.chat_count}</td><td>${device.photo_count}</td>
+          <td><div class="actions"><button class="command-button capture" data-id="${escapeHtml(device.device_id)}" ${device.online ? '' : 'disabled'}><i data-lucide="camera"></i>拍照</button><button class="secondary-button greet" data-id="${escapeHtml(device.device_id)}" ${device.online ? '' : 'disabled'} title="让桌宠主动问候"><i data-lucide="message-circle"></i>打招呼</button><button class="secondary-button ambient-config" data-id="${escapeHtml(device.device_id)}" title="主动聆听设置"><i data-lucide="ear"></i>聆听</button><button class="secondary-button ota" data-id="${escapeHtml(device.device_id)}" ${device.online ? '' : 'disabled'} title="远程升级"><i data-lucide="upload-cloud"></i>升级</button></div></td>
+        </tr>`).join('')}</tbody></table>` : empty('还没有设备连接');
+      document.querySelectorAll('.capture').forEach(button => button.addEventListener('click', () => requestCapture(button.dataset.id, button)));
+      document.querySelectorAll('.greet').forEach(button => button.addEventListener('click', () => requestGreeting(button.dataset.id, button)));
+      document.querySelectorAll('.ambient-config').forEach(button => button.addEventListener('click', () => openAmbient(button.dataset.id)));
+      document.querySelectorAll('.ota').forEach(button => button.addEventListener('click', () => openOta(button.dataset.id)));
+      updateDeviceFilters();
+      renderIcons();
+    }
+
+    function updateDeviceFilters() {
+      const options = `<option value="">全部设备</option>${state.devices.map(device => `<option value="${escapeHtml(device.device_id)}">${escapeHtml(device.name)}</option>`).join('')}`;
+      ['#chat-device', '#photo-device', '#ambient-device'].forEach(selector => {
+        const element = document.querySelector(selector);
+        const current = element.value;
+        element.innerHTML = options;
+        element.value = current;
+      });
+    }
+
+    async function requestCapture(deviceId, button) {
+      button.disabled = true;
+      try {
+        const payload = await api(`/api/v1/admin/devices/${encodeURIComponent(deviceId)}/capture`, { method: 'POST' });
+        toast(payload.reused ? '设备已有拍照任务' : '拍照命令已下发');
+      } catch (error) { toast(error.message); }
+      finally { setTimeout(() => { button.disabled = false; }, 1500); }
+    }
+
+    async function requestGreeting(deviceId, button) {
+      button.disabled = true;
+      try {
+        const payload = await api(`/api/v1/admin/devices/${encodeURIComponent(deviceId)}/greet`, { method: 'POST' });
+        toast(payload.reused ? '设备已有问候任务' : '问候命令已下发');
+      } catch (error) { toast(error.message); }
+      finally { setTimeout(() => { button.disabled = false; }, 1500); }
+    }
+
+    async function openAmbient(deviceId) {
+      try {
+        const payload = await api(`/api/v1/admin/devices/${encodeURIComponent(deviceId)}/ambient`);
+        const settings = payload.settings;
+        document.querySelector('#ambient-device-id').value = deviceId;
+        document.querySelector('#ambient-enabled').checked = settings.enabled;
+        document.querySelector('#ambient-cooldown').value = settings.cooldown_seconds;
+        document.querySelector('#ambient-hourly').value = settings.max_per_hour;
+        document.querySelector('#ambient-quiet-start').value = settings.quiet_start;
+        document.querySelector('#ambient-quiet-end').value = settings.quiet_end;
+        document.querySelector('#ambient-debug-audio').checked = settings.debug_audio_enabled;
+        document.querySelector('#ambient-debug-retention').value = settings.debug_retention_days;
+        document.querySelector('#ambient-debug-max-mb').value = settings.debug_max_mb;
+        document.querySelector('#ambient-debug-storage').textContent =
+          `当前保存 ${payload.debug_storage.megabytes} MB，上限 ${settings.debug_max_mb} MB`;
+        document.querySelector('#ambient-engine').textContent = payload.speech.ready
+          ? `语音引擎可用 · ${payload.speech.engine} · 决策 ${payload.decision.engine}`
+          : '语音引擎未就绪，设备会继续保留普通唤醒对话';
+        document.querySelector('#ambient-dialog').showModal();
+      } catch (error) { toast(error.message); }
+    }
+
+    async function submitAmbient(event) {
+      event.preventDefault();
+      const deviceId = document.querySelector('#ambient-device-id').value;
+      const body = {
+        enabled: document.querySelector('#ambient-enabled').checked,
+        cooldown_seconds: Number(document.querySelector('#ambient-cooldown').value),
+        max_per_hour: Number(document.querySelector('#ambient-hourly').value),
+        quiet_start: document.querySelector('#ambient-quiet-start').value,
+        quiet_end: document.querySelector('#ambient-quiet-end').value,
+        debug_audio_enabled: document.querySelector('#ambient-debug-audio').checked,
+        debug_retention_days: Number(document.querySelector('#ambient-debug-retention').value),
+        debug_max_mb: Number(document.querySelector('#ambient-debug-max-mb').value)
+      };
+      try {
+        await api(`/api/v1/admin/devices/${encodeURIComponent(deviceId)}/ambient`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        document.querySelector('#ambient-dialog').close();
+        await Promise.all([loadDevices(), loadAmbient()]);
+        toast(body.debug_audio_enabled ? '主动聆听与调试采样设置已保存' : '主动聆听设置已保存');
+      } catch (error) { toast(error.message); }
+    }
+
+    async function clearAmbientAudio() {
+      const deviceId = document.querySelector('#ambient-device-id').value;
+      if (!deviceId || !confirm('确认清空这台设备已保存的调试音频？转写和诊断记录会保留。')) return;
+      try {
+        const payload = await api(`/api/v1/admin/devices/${encodeURIComponent(deviceId)}/ambient-debug-audio`, { method: 'DELETE' });
+        document.querySelector('#ambient-debug-storage').textContent = '当前保存 0 MB';
+        await loadAmbient();
+        toast(`已清理 ${payload.cleared_events} 条音频`);
+      } catch (error) { toast(error.message); }
+    }
+
+    function openOta(deviceId) {
+      document.querySelector('#ota-device-id').value = deviceId;
+      document.querySelector('#ota-version').value = '';
+      document.querySelector('#ota-file').value = '';
+      document.querySelector('#ota-status').textContent = `目标设备：${deviceId}`;
+      document.querySelector('#ota-dialog').showModal();
+    }
+
+    async function submitOta(event) {
+      event.preventDefault();
+      const button = document.querySelector('#submit-ota');
+      const status = document.querySelector('#ota-status');
+      const deviceId = document.querySelector('#ota-device-id').value;
+      const version = document.querySelector('#ota-version').value.trim();
+      const firmware = document.querySelector('#ota-file').files[0];
+      if (!deviceId || !version || !firmware) return;
+      button.disabled = true;
+      try {
+        status.textContent = '正在上传并校验固件…';
+        const form = new FormData();
+        form.append('version', version);
+        form.append('firmware', firmware, firmware.name);
+        const release = await api('/api/v1/admin/firmware', { method: 'POST', body: form });
+        status.textContent = '固件已校验，正在下发升级命令…';
+        const command = await api(`/api/v1/admin/devices/${encodeURIComponent(deviceId)}/ota`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ release_id: release.release_id })
+        });
+        status.textContent = `升级任务已下发：${command.version}`;
+        toast(command.reused ? '设备已有升级任务' : '远程升级命令已下发');
+        setTimeout(() => document.querySelector('#ota-dialog').close(), 1200);
+      } catch (error) {
+        status.textContent = error.message;
+        toast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function loadChats() {
+      const deviceId = document.querySelector('#chat-device').value;
+      const query = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+      const payload = await api(`/api/v1/admin/chats${query}`);
+      document.querySelector('#chat-table').innerHTML = payload.chats.length ? `
+        <table><thead><tr><th>时间</th><th>设备</th><th>角色</th><th>内容</th><th>会话</th></tr></thead>
+        <tbody>${payload.chats.map(chat => `<tr><td>${formatTime(chat.occurred_at_ms)}</td><td>${escapeHtml(chat.device_id)}</td>
+          <td><span class="role ${chat.role}">${chat.role === 'user' ? '用户' : '桌宠'}</span></td>
+          <td class="content-cell">${escapeHtml(chat.content)}</td><td>${escapeHtml(chat.session_id || '-')}</td></tr>`).join('')}</tbody></table>` : empty('暂无聊天记录');
+    }
+
+    async function loadPhotos() {
+      const deviceId = document.querySelector('#photo-device').value;
+      const query = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+      const payload = await api(`/api/v1/admin/photos${query}`);
+      document.querySelector('#photo-gallery').innerHTML = payload.photos.length ? payload.photos.map(photo => `
+        <article class="photo">
+          <img data-photo-id="${photo.id}" alt="设备拍摄照片" loading="lazy">
+          <div class="photo-body"><div class="photo-meta"><span class="source">${photo.source === 'voice' ? '语音拍照' : '后台拍照'}</span><span>${formatTime(photo.captured_at_ms)}</span></div>
+          <div class="photo-analysis">${escapeHtml(photo.analysis || photo.prompt || '设备照片')}</div>
+          <button class="danger-button delete-photo" data-id="${photo.id}"><i data-lucide="trash-2"></i>删除</button></div>
+        </article>`).join('') : empty('暂无符合保存规则的照片');
+      document.querySelectorAll('.delete-photo').forEach(button => button.addEventListener('click', () => deletePhoto(button.dataset.id)));
+      state.photoUrls.forEach(url => URL.revokeObjectURL(url));
+      state.photoUrls = [];
+      await Promise.all([...document.querySelectorAll('img[data-photo-id]')].map(async image => {
+        const response = await fetch(relativeUrl(`/api/v1/admin/photos/${image.dataset.photoId}/image`), {
+          headers: { 'X-Admin-Token': state.token }
+        });
+        if (!response.ok) return;
+        const url = URL.createObjectURL(await response.blob());
+        state.photoUrls.push(url);
+        image.src = url;
+      }));
+      renderIcons();
+    }
+
+    const formatBytes = value => value >= 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(2)} MB`
+      : value >= 1024 ? `${(value / 1024).toFixed(1)} KB` : `${value || 0} B`;
+
+    function ambientAudioActions(event) {
+      if (!event.debug_recorded) return '<span class="summary">未启用保存</span>';
+      if (!event.has_debug_raw && !event.has_debug_wav) return '<span class="summary">处理中或已清理</span>';
+      return `<div class="audio-actions">
+        ${event.has_debug_wav ? `<button class="secondary-button play-ambient" data-id="${event.id}"><i data-lucide="play"></i>试听</button>
+          <button class="secondary-button download-ambient" data-id="${event.id}" data-kind="wav"><i data-lucide="download"></i>WAV</button>` : ''}
+        ${event.has_debug_raw ? `<button class="secondary-button download-ambient" data-id="${event.id}" data-kind="raw"><i data-lucide="file-down"></i>原始包</button>` : ''}
+        <button class="danger-button delete-ambient" data-id="${event.id}"><i data-lucide="trash-2"></i>删除记录</button>
+      </div>`;
+    }
+
+    function ambientDiagnostics(event) {
+      const signal = event.peak_dbfs == null ? '电平待处理' : `峰值 ${event.peak_dbfs} dBFS · RMS ${event.rms_dbfs} dBFS`;
+      const timing = `解码 ${event.decode_ms || 0} · ASR ${event.asr_ms || 0} · 决策 ${event.decision_ms || 0} · TTS ${event.tts_ms || 0} · 总计 ${event.pipeline_ms || 0} ms`;
+      const device = `${escapeHtml(networkName(event.network_snapshot))} · 固件 ${escapeHtml(event.firmware_snapshot || '-')} · ${escapeHtml(event.state_snapshot || '-')}`;
+      const digest = event.debug_sha256 ? `SHA ${escapeHtml(event.debug_sha256.slice(0, 12))}` : 'SHA -';
+      return `<div>${(event.duration_ms / 1000).toFixed(2)} 秒 · ${formatBytes(event.byte_size)} · ${event.sample_rate || 0} Hz · ${event.frame_count || 0} 帧</div>
+        <div>${signal}</div><div>${timing}</div><div>${device}</div>
+        <div class="summary">${digest} · 来源 ${escapeHtml(event.source_ip || '-')} · 保存 ${formatBytes(event.debug_storage_bytes)}</div>
+        ${event.debug_error ? `<div class="debug-warning">${escapeHtml(event.debug_error)}</div>` : ''}`;
+    }
+
+    async function fetchAmbientAudio(eventId, kind) {
+      const response = await fetch(relativeUrl(`/api/v1/admin/ambient-events/${eventId}/audio?kind=${kind}`), {
+        headers: { 'X-Admin-Token': state.token }
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.detail || `音频读取失败 ${response.status}`);
+      }
+      return response.blob();
+    }
+
+    async function playAmbientAudio(eventId, button) {
+      button.disabled = true;
+      try {
+        if (state.activeAudio) state.activeAudio.pause();
+        if (state.activeAudioUrl) URL.revokeObjectURL(state.activeAudioUrl);
+        const url = URL.createObjectURL(await fetchAmbientAudio(eventId, 'wav'));
+        const audio = new Audio(url);
+        state.activeAudio = audio;
+        state.activeAudioUrl = url;
+        audio.addEventListener('ended', () => {
+          URL.revokeObjectURL(url);
+          if (state.activeAudio === audio) { state.activeAudio = null; state.activeAudioUrl = ''; }
+        }, { once: true });
+        await audio.play();
+      } catch (error) { toast(error.message); }
+      finally { button.disabled = false; }
+    }
+
+    async function downloadAmbientAudio(eventId, kind) {
+      try {
+        const url = URL.createObjectURL(await fetchAmbientAudio(eventId, kind));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `ambient-${eventId}.${kind === 'wav' ? 'wav' : 'cap1'}`;
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+      } catch (error) { toast(error.message); }
+    }
+
+    async function deleteAmbientEvent(eventId) {
+      if (!confirm('确认删除这条主动互动记录及其调试音频？')) return;
+      try {
+        await api(`/api/v1/admin/ambient-events/${eventId}`, { method: 'DELETE' });
+        await loadAmbient();
+        toast('主动互动记录已删除');
+      } catch (error) { toast(error.message); }
+    }
+
+    async function loadAmbient() {
+      const deviceId = document.querySelector('#ambient-device').value;
+      const query = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+      const payload = await api(`/api/v1/admin/ambient-events${query}`);
+      document.querySelector('#ambient-summary').textContent = payload.speech.ready
+        ? `语音引擎正常 · ${payload.decision.engine} · 共 ${payload.events.length} 条近期记录`
+        : '语音引擎未就绪，主动聆听不会在设备端启用';
+      document.querySelector('#ambient-table').innerHTML = payload.events.length ? `
+        <table><thead><tr><th>时间</th><th>设备</th><th>结果</th><th>调试音频</th><th>识别文字</th><th>桌宠回应</th><th>诊断</th><th>依据</th></tr></thead>
+        <tbody>${payload.events.map(event => `<tr>
+          <td>${formatTime(event.created_at_ms)}</td><td>${escapeHtml(event.device_id)}</td>
+          <td><span class="event-status ${escapeHtml(event.status)}">${event.status === 'responded' ? '已回应' : event.status === 'ignored' ? '已忽略' : event.status === 'failed' ? '失败' : '处理中'}</span></td>
+          <td>${ambientAudioActions(event)}</td>
+          <td class="content-cell">${escapeHtml(event.transcript || '-')}</td>
+          <td class="content-cell">${escapeHtml(event.response_text || '-')}</td>
+          <td class="debug-cell">${ambientDiagnostics(event)}</td>
+          <td class="content-cell">${escapeHtml(event.reason || '-')}</td>
+        </tr>`).join('')}</tbody></table>` : empty('暂无主动互动记录');
+      document.querySelectorAll('.play-ambient').forEach(button => button.addEventListener('click', () => playAmbientAudio(button.dataset.id, button)));
+      document.querySelectorAll('.download-ambient').forEach(button => button.addEventListener('click', () => downloadAmbientAudio(button.dataset.id, button.dataset.kind)));
+      document.querySelectorAll('.delete-ambient').forEach(button => button.addEventListener('click', () => deleteAmbientEvent(button.dataset.id)));
+      renderIcons();
+    }
+
+    async function deletePhoto(photoId) {
+      if (!confirm('确认删除这张照片？')) return;
+      try { await api(`/api/v1/admin/photos/${photoId}`, { method: 'DELETE' }); await loadPhotos(); toast('照片已删除'); }
+      catch (error) { toast(error.message); }
+    }
+
+    async function refreshAll(showConnected = false) {
+      if (!state.token) { toast('请先输入管理令牌'); return; }
+      try {
+        await loadDevices();
+        await Promise.all([loadChats(), loadPhotos(), loadAmbient()]);
+        if (showConnected) toast('后台已连接');
+      }
+      catch (error) { toast(error.message); }
+    }
+
+    document.querySelector('#save-token').addEventListener('click', () => {
+      state.token = tokenInput.value.trim();
+      sessionStorage.setItem('petCloudToken', state.token);
+      refreshAll(true);
+    });
+    document.querySelector('#refresh').addEventListener('click', refreshAll);
+    document.querySelector('#chat-device').addEventListener('change', loadChats);
+    document.querySelector('#photo-device').addEventListener('change', loadPhotos);
+    document.querySelector('#ambient-device').addEventListener('change', loadAmbient);
+    document.querySelector('#ota-form').addEventListener('submit', submitOta);
+    document.querySelector('#ambient-form').addEventListener('submit', submitAmbient);
+    document.querySelector('#clear-ambient-audio').addEventListener('click', clearAmbientAudio);
+    document.querySelector('#close-ota').addEventListener('click', () => document.querySelector('#ota-dialog').close());
+    document.querySelector('#cancel-ota').addEventListener('click', () => document.querySelector('#ota-dialog').close());
+    document.querySelector('#close-ambient').addEventListener('click', () => document.querySelector('#ambient-dialog').close());
+    document.querySelector('#cancel-ambient').addEventListener('click', () => document.querySelector('#ambient-dialog').close());
+    document.querySelectorAll('.tab').forEach(tab => tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach(item => item.classList.toggle('active', item === tab));
+      document.querySelectorAll('.view').forEach(view => view.classList.toggle('active', view.id === `${tab.dataset.view}-view`));
+    }));
+
+    renderIcons();
+    if (state.token) refreshAll();
+    setInterval(() => state.token && loadDevices().catch(() => {}), 5000);
+  </script>
+</body>
+</html>

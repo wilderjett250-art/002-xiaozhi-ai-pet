@@ -1,0 +1,7 @@
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
+python-multipart==0.0.20
+numpy==2.2.6
+opuslib==3.0.1
+sherpa-onnx==1.13.4
+sherpa-onnx-bin==1.13.4
