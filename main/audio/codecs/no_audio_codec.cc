@@ -1,5 +1,7 @@
 #include "no_audio_codec.h"
+#include "system_telemetry.h"
 
+#include <esp_timer.h>
 #include <esp_log.h>
 #include <cmath>
 #include <cstdint>
@@ -251,6 +253,21 @@ int NoAudioCodec::Read(int16_t* dest, int samples) {
     for (int i = 0; i < samples; i++) {
         int32_t value = bit32_buffer[i] >> 12;
         dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    }
+    static int64_t last_log_us = 0;
+    auto now_us = esp_timer_get_time();
+    if (now_us - last_log_us > 1000000) {
+        int32_t peak = 0;
+        int64_t sum = 0;
+        for (int i = 0; i < samples; i++) {
+            int32_t abs_value = std::abs(static_cast<int32_t>(dest[i]));
+            peak = std::max(peak, abs_value);
+            sum += abs_value;
+        }
+        int avg = samples > 0 ? static_cast<int>(sum / samples) : 0;
+        SystemTelemetry::SetMicLevel(peak, avg);
+        ESP_LOGD(TAG, "Mic level: samples=%d peak=%ld avg=%d", samples, static_cast<long>(peak), avg);
+        last_log_us = now_us;
     }
     return samples;
 }

@@ -11,8 +11,8 @@
 
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
 
-#define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_1
-#define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_2
+#define AUDIO_I2S_MIC_GPIO_WS   GPIO_NUM_2
+#define AUDIO_I2S_MIC_GPIO_SCK  GPIO_NUM_1
 #define AUDIO_I2S_MIC_GPIO_DIN  GPIO_NUM_42
 #define AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_39
 #define AUDIO_I2S_SPK_GPIO_BCLK GPIO_NUM_40
@@ -302,7 +302,13 @@
 #endif
 
 
+// Optional Cat.1/4G modem UART. ESP TX connects to modem RX, ESP RX connects to modem TX.
+#define ML307_TX_PIN GPIO_NUM_14
+#define ML307_RX_PIN GPIO_NUM_3
+#define ML307_DTR_PIN GPIO_NUM_NC
+#define ML307_BAUD_RATE 460800
+
 // A MCP Test: Control a lamp
-#define LAMP_GPIO GPIO_NUM_14
+#define LAMP_GPIO GPIO_NUM_NC
 
 #endif // _BOARD_CONFIG_H_

@@ -4,6 +4,7 @@
 #include <lvgl.h>
 #include <thread>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <freertos/FreeRTOS.h>
@@ -30,6 +31,8 @@ private:
     camera_fb_t *current_fb_ = nullptr;
     uint8_t *encode_buf_ = nullptr;  // Buffer for JPEG encoding (with optional byte swap)
     size_t encode_buf_size_ = 0;
+    mutable std::recursive_mutex operation_mutex_;
+    bool CaptureInternal(bool show_preview);
 
 public:
     Esp32Camera(const camera_config_t &config);
@@ -37,8 +40,17 @@ public:
 
     virtual void SetExplainUrl(const std::string &url, const std::string &token) override;
     virtual bool Capture() override;
+    virtual bool CaptureSilent() override;
     virtual bool SetHMirror(bool enabled) override;
     virtual bool SetVFlip(bool enabled) override;
     virtual bool SetSwapBytes(bool enabled) override;
+    uint32_t GetFrameSignature() const;
     virtual std::string Explain(const std::string &question) override;
+    virtual bool GetCapturedJpeg(CameraPhoto& photo, uint8_t quality = 80) override;
+    virtual bool CaptureAndGetJpeg(CameraPhoto& photo, uint8_t quality = 80,
+                                   bool show_preview = true) override;
+    virtual std::string CaptureAndExplain(const std::string &question, bool show_preview = true) override;
+    virtual std::string CaptureExplainAndGetJpeg(const std::string& question, CameraPhoto& photo,
+                                                 uint8_t quality = 80,
+                                                 bool show_preview = true) override;
 };

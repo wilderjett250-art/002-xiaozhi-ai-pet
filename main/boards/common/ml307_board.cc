@@ -12,12 +12,13 @@
 
 static const char *TAG = "Ml307Board";
 
-// Maximum retry count for modem detection
-static constexpr int MODEM_DETECT_MAX_RETRIES = 30;
+// Keep modem startup bounded so dual-network boards can recover to Wi-Fi.
+static constexpr int MODEM_DETECT_MAX_RETRIES = 3;
+static constexpr int MODEM_DETECT_TIMEOUT_MS = 5000;
 // Maximum retry count for network registration
 static constexpr int NETWORK_REG_MAX_RETRIES = 6;
 
-Ml307Board::Ml307Board(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin) : tx_pin_(tx_pin), rx_pin_(rx_pin), dtr_pin_(dtr_pin) {
+Ml307Board::Ml307Board(gpio_num_t tx_pin, gpio_num_t rx_pin, gpio_num_t dtr_pin, int baud_rate) : tx_pin_(tx_pin), rx_pin_(rx_pin), dtr_pin_(dtr_pin), baud_rate_(baud_rate) {
 }
 
 std::string Ml307Board::GetBoardType() {
@@ -71,8 +72,20 @@ void Ml307Board::NetworkTask() {
     // Try to detect modem with retry limit
     int detect_retries = 0;
     while (detect_retries < MODEM_DETECT_MAX_RETRIES) {
-        modem_ = AtModem::Detect(tx_pin_, rx_pin_, dtr_pin_, 921600);
+        const bool try_swapped_pins = detect_retries == 1;
+        const gpio_num_t attempt_tx = try_swapped_pins ? rx_pin_ : tx_pin_;
+        const gpio_num_t attempt_rx = try_swapped_pins ? tx_pin_ : rx_pin_;
+        ESP_LOGI(TAG, "Modem detection attempt %d/%d: ESP TX=GPIO%d RX=GPIO%d target_baud=%d",
+                 detect_retries + 1, MODEM_DETECT_MAX_RETRIES,
+                 attempt_tx, attempt_rx, baud_rate_);
+        modem_ = AtModem::Detect(attempt_tx, attempt_rx, dtr_pin_, baud_rate_,
+                                 MODEM_DETECT_TIMEOUT_MS);
         if (modem_ != nullptr) {
+            if (try_swapped_pins) {
+                std::swap(tx_pin_, rx_pin_);
+                ESP_LOGW(TAG, "Modem detected with swapped UART wiring; using ESP TX=GPIO%d RX=GPIO%d",
+                         tx_pin_, rx_pin_);
+            }
             break;
         }
         detect_retries++;
@@ -81,7 +94,7 @@ void Ml307Board::NetworkTask() {
 
     if (modem_ == nullptr) {
         ESP_LOGE(TAG, "Failed to detect modem after %d retries", MODEM_DETECT_MAX_RETRIES);
-        OnNetworkEvent(NetworkEvent::ModemErrorInitFailed);
+        OnNetworkEvent(NetworkEvent::ModemErrorInitFailed, "4G modem did not respond to AT commands");
         return;
     }
 

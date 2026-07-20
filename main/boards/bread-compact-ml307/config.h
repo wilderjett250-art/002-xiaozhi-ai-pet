@@ -51,6 +51,7 @@
 
 #define ML307_RX_PIN GPIO_NUM_11
 #define ML307_TX_PIN GPIO_NUM_12
+#define ML307_BAUD_RATE 460800
 
 
 // A MCP Test: Control a lamp
