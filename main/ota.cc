@@ -13,6 +13,7 @@
 #include <esp_efuse.h>
 #include <esp_efuse_table.h>
 #include <esp_heap_caps.h>
+#include <mbedtls/sha256.h>
 #ifdef SOC_HMAC_SUPPORTED
 #include <esp_hmac.h>
 #endif
@@ -21,8 +22,60 @@
 #include <vector>
 #include <sstream>
 #include <algorithm>
+#include <cctype>
 
 #define TAG "Ota"
+
+namespace {
+class Sha256Stream {
+public:
+    explicit Sha256Stream(const std::string& expected) : expected_(expected) {
+        std::transform(expected_.begin(), expected_.end(), expected_.begin(),
+                       [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+        valid_ = expected_.empty() || expected_.size() == 64;
+        for (unsigned char ch : expected_) {
+            valid_ = valid_ && std::isxdigit(ch);
+        }
+        mbedtls_sha256_init(&context_);
+        if (valid_ && !expected_.empty()) {
+            valid_ = mbedtls_sha256_starts(&context_, 0) == 0;
+        }
+    }
+
+    ~Sha256Stream() {
+        mbedtls_sha256_free(&context_);
+    }
+
+    bool IsValid() const { return valid_; }
+
+    bool Update(const unsigned char* data, size_t size) {
+        return expected_.empty() || mbedtls_sha256_update(&context_, data, size) == 0;
+    }
+
+    bool Matches() {
+        if (expected_.empty()) {
+            return true;
+        }
+        unsigned char digest[32] = {};
+        if (mbedtls_sha256_finish(&context_, digest) != 0) {
+            return false;
+        }
+        static constexpr char kHex[] = "0123456789abcdef";
+        std::string actual;
+        actual.reserve(64);
+        for (unsigned char byte : digest) {
+            actual.push_back(kHex[byte >> 4]);
+            actual.push_back(kHex[byte & 0x0f]);
+        }
+        return actual == expected_;
+    }
+
+private:
+    mbedtls_sha256_context context_{};
+    std::string expected_;
+    bool valid_ = false;
+};
+}  // namespace
 
 
 Ota::Ota() {
@@ -264,8 +317,15 @@ void Ota::MarkCurrentVersionValid() {
     }
 }
 
-bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progress, size_t speed)> callback) {
+bool Ota::Upgrade(const std::string& firmware_url,
+                  std::function<void(int progress, size_t speed)> callback,
+                  const std::string& expected_sha256) {
     ESP_LOGI(TAG, "Upgrading firmware from %s", firmware_url.c_str());
+    Sha256Stream sha256(expected_sha256);
+    if (!sha256.IsValid()) {
+        ESP_LOGE(TAG, "Invalid expected firmware SHA-256");
+        return false;
+    }
     esp_ota_handle_t update_handle = 0;
     auto update_partition = esp_ota_get_next_update_partition(NULL);
     if (update_partition == NULL) {
@@ -294,6 +354,11 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         ESP_LOGE(TAG, "Failed to get content length");
         return false;
     }
+    if (content_length > update_partition->size) {
+        ESP_LOGE(TAG, "Firmware image is too large: %zu > %lu", content_length,
+                 static_cast<unsigned long>(update_partition->size));
+        return false;
+    }
 
     constexpr size_t PAGE_SIZE = 4096;
     char* buffer = (char*)heap_caps_malloc(PAGE_SIZE, MALLOC_CAP_INTERNAL);
@@ -309,6 +374,13 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
         int ret = http->Read(buffer + buffer_offset, PAGE_SIZE - buffer_offset);
         if (ret < 0) {
             ESP_LOGE(TAG, "Failed to read HTTP data: %s", esp_err_to_name(ret));
+            heap_caps_free(buffer);
+            return false;
+        }
+        if (ret > 0 && !sha256.Update(
+                reinterpret_cast<const unsigned char*>(buffer + buffer_offset), ret)) {
+            ESP_LOGE(TAG, "Failed to calculate firmware SHA-256");
+            esp_ota_abort(update_handle);
             heap_caps_free(buffer);
             return false;
         }
@@ -365,6 +437,12 @@ bool Ota::Upgrade(const std::string& firmware_url, std::function<void(int progre
     }
     http->Close();
     heap_caps_free(buffer);
+
+    if (!sha256.Matches()) {
+        ESP_LOGE(TAG, "Firmware SHA-256 mismatch");
+        esp_ota_abort(update_handle);
+        return false;
+    }
 
     esp_err_t err = esp_ota_end(update_handle);
     if (err != ESP_OK) {

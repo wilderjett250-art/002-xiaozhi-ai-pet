@@ -6,6 +6,24 @@ config OTA_URL
     help
         The application will access this URL to check for new firmwares and server address.
 
+config COMPANION_CLOUD_URL
+    string "Companion cloud HTTPS URL"
+    default ""
+    help
+        HTTPS root URL of the companion management service. Leave empty to disable cloud archive.
+
+config COMPANION_CLOUD_DEVICE_TOKEN
+    string "Companion cloud device token"
+    default ""
+    help
+        Bearer token shared by this device and the companion management service.
+
+config COMPANION_CLOUD_DEVICE_NAME
+    string "Companion cloud device name"
+    default "Cat Desktop Pet"
+    help
+        Device name shown in the companion management dashboard.
+
 choice
     prompt "Flash Assets"
     default FLASH_DEFAULT_ASSETS if !USE_EMOTE_MESSAGE_STYLE
@@ -158,6 +176,9 @@ choice BOARD_TYPE
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_WIFI_CAM
         bool "Bread Compact WiFi + LCD + Camera (面包板)"
+        depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_LELIAN_MLR_S3_DRAFT
+        bool "LeLian MLR S3 draft"
         depends on IDF_TARGET_ESP32S3
     config BOARD_TYPE_BREAD_COMPACT_ML307
         bool "Bread Compact ML307/EC801E (面包板 4G)"
@@ -881,7 +902,7 @@ config CUSTOM_WAKE_WORD_DISPLAY
     default "小土豆"
     depends on USE_CUSTOM_WAKE_WORD
     help
-        Greeting sent to the server after wake word detection
+        Greeting sent to the server after wake word detection. Multiple wake words can use comma-separated display texts in matching order.
 
 config CUSTOM_WAKE_WORD_THRESHOLD
     int "Custom Wake Word Threshold (%)"

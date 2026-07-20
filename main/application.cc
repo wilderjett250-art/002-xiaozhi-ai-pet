@@ -3,12 +3,14 @@
 #include "display.h"
 #include "system_info.h"
 #include "audio_codec.h"
+#include "music_player.h"
 #include "mqtt_protocol.h"
 #include "websocket_protocol.h"
 #include "assets/lang_config.h"
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "companion_cloud.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -97,6 +99,10 @@ void Application::Initialize() {
     auto& mcp_server = McpServer::GetInstance();
     mcp_server.AddCommonTools();
     mcp_server.AddUserOnlyTools();
+    auto& music_player = MusicPlayer::GetInstance();
+    music_player.Initialize(&audio_service_, display);
+    music_player.RegisterTools();
+    CompanionCloud::GetInstance().RegisterTools();
 
     // Set network event callback for UI updates and network state handling
     board.SetNetworkEventCallback([this](NetworkEvent event, const std::string& data) {
@@ -313,6 +319,7 @@ void Application::HandleActivationDoneEvent() {
     ota_.reset();
     auto& board = Board::GetInstance();
     board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    CompanionCloud::GetInstance().Start();
 
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
@@ -542,6 +549,8 @@ void Application::InitializeProtocol() {
                 auto text = cJSON_GetObjectItem(root, "text");
                 if (cJSON_IsString(text)) {
                     ESP_LOGI(TAG, "<< %s", text->valuestring);
+                    CompanionCloud::GetInstance().RecordChat(
+                        "assistant", text->valuestring, protocol_->session_id());
                     Schedule([display, message = std::string(text->valuestring)]() {
                         display->SetChatMessage("assistant", message.c_str());
                     });
@@ -550,8 +559,14 @@ void Application::InitializeProtocol() {
         } else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
-                ESP_LOGI(TAG, ">> %s", text->valuestring);
-                Schedule([display, message = std::string(text->valuestring)]() {
+                std::string message(text->valuestring);
+                ESP_LOGI(TAG, ">> %s", message.c_str());
+                CompanionCloud::GetInstance().RecordChat(
+                    "user", message, protocol_->session_id());
+                if (stt_callback_) {
+                    stt_callback_(message);
+                }
+                Schedule([display, message = std::move(message)]() {
                     display->SetChatMessage("user", message.c_str());
                 });
             }
@@ -664,6 +679,12 @@ void Application::ToggleChatState() {
 }
 
 void Application::StartListening() {
+    StartListening(kListeningModeManualStop);
+}
+
+void Application::StartListening(ListeningMode mode) {
+    requested_listening_mode_.store(mode);
+    MusicPlayer::GetInstance().InterruptForConversation();
     xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING);
 }
 
@@ -731,6 +752,7 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
 void Application::HandleStartListeningEvent() {
     auto state = GetDeviceState();
+    auto mode = requested_listening_mode_.load();
     
     if (state == kDeviceStateActivating) {
         SetDeviceState(kDeviceStateIdle);
@@ -750,15 +772,15 @@ void Application::HandleStartListeningEvent() {
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
-            Schedule([this]() {
-                ContinueOpenAudioChannel(kListeningModeManualStop);
+            Schedule([this, mode]() {
+                ContinueOpenAudioChannel(mode);
             });
             return;
         }
-        SetListeningMode(kListeningModeManualStop);
+        SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
-        SetListeningMode(kListeningModeManualStop);
+        SetListeningMode(mode);
     }
 }
 
@@ -868,21 +890,27 @@ void Application::HandleStateChangedEvent() {
     
     switch (new_state) {
         case kDeviceStateUnknown:
+            audio_service_.EnableAmbientCapture(false);
+            audio_service_.EnableVoiceProcessing(false);
+            audio_service_.EnableWakeWordDetection(true);
+            break;
         case kDeviceStateIdle:
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
-            audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
+            RefreshIdleAudioMode();
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
             display->SetChatMessage("system", "");
+            audio_service_.EnableAmbientCapture(false);
+            audio_service_.EnableVoiceProcessing(false);
             break;
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            audio_service_.EnableAmbientCapture(false);
 
             // Make sure the audio processor is running
             if (play_popup_on_listening_ || !audio_service_.IsAudioProcessorRunning()) {
@@ -913,6 +941,7 @@ void Application::HandleStateChangedEvent() {
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
+            audio_service_.EnableAmbientCapture(false);
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
@@ -922,6 +951,7 @@ void Application::HandleStateChangedEvent() {
             audio_service_.ResetDecoder();
             break;
         case kDeviceStateWifiConfiguring:
+            audio_service_.EnableAmbientCapture(false);
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
             break;
@@ -969,7 +999,8 @@ void Application::Reboot() {
     esp_restart();
 }
 
-bool Application::UpgradeFirmware(const std::string& url, const std::string& version) {
+bool Application::UpgradeFirmware(const std::string& url, const std::string& version,
+                                  const std::string& expected_sha256, bool reboot_on_success) {
     auto& board = Board::GetInstance();
     auto display = board.GetDisplay();
 
@@ -1001,7 +1032,7 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         Schedule([display, message = std::string(buffer)]() {
             display->SetChatMessage("system", message.c_str());
         });
-    });
+    }, expected_sha256);
 
     if (!upgrade_success) {
         // Upgrade failed, restart audio service and continue running
@@ -1016,7 +1047,9 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
         ESP_LOGI(TAG, "Firmware upgrade successful, rebooting...");
         display->SetChatMessage("system", "Upgrade successful, rebooting...");
         vTaskDelay(pdMS_TO_TICKS(1000)); // Brief pause to show message
-        Reboot();
+        if (reboot_on_success) {
+            Reboot();
+        }
         return true;
     }
 }
@@ -1025,6 +1058,8 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     if (!protocol_) {
         return;
     }
+
+    MusicPlayer::GetInstance().InterruptForConversation();
 
     auto state = GetDeviceState();
     
@@ -1073,6 +1108,32 @@ bool Application::CanEnterSleepMode() {
 
 void Application::RegisterMcpBroadcastCallback(std::function<void(const std::string&)> callback) {
     mcp_broadcast_callback_ = std::move(callback);
+}
+
+void Application::RefreshIdleAudioMode() {
+    if (GetDeviceState() != kDeviceStateIdle) {
+        return;
+    }
+    const bool ambient = CompanionCloud::GetInstance().IsAmbientListeningEnabled() &&
+                         !MusicPlayer::GetInstance().IsActive();
+    audio_service_.EnableAmbientCapture(ambient);
+    if (ambient) {
+        if (!audio_service_.IsAudioProcessorRunning()) {
+            audio_service_.EnableVoiceProcessing(true);
+        }
+    } else if (audio_service_.IsAudioProcessorRunning()) {
+        audio_service_.EnableVoiceProcessing(false);
+    }
+    audio_service_.EnableWakeWordDetection(true);
+    if (ambient) {
+        if (auto display = Board::GetInstance().GetDisplay(); display != nullptr) {
+            display->SetStatus("环境聆听");
+        }
+    }
+}
+
+void Application::RegisterSttCallback(std::function<void(const std::string&)> callback) {
+    stt_callback_ = std::move(callback);
 }
 
 void Application::SendMcpMessage(const std::string& payload) {

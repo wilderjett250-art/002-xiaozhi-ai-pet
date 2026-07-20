@@ -718,6 +718,13 @@ def get_emoji_collection_path(default_emoji_collection, xiaozhi_fonts_path, proj
     """
     if not default_emoji_collection:
         return None
+
+    # Project-local emoji collections let a board override the bundled emoji
+    # assets without modifying managed_components.
+    if project_root:
+        emoji_path = os.path.join(project_root, 'main', 'assets', 'emoji', default_emoji_collection)
+        if os.path.exists(emoji_path):
+            return emoji_path
     
     # Special handling for otto-gif collection
     if default_emoji_collection == 'otto-gif':

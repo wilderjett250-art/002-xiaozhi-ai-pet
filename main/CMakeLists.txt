@@ -1,6 +1,7 @@
 # Define source files
 set(SOURCES "audio/audio_codec.cc"
             "audio/audio_service.cc"
+            "audio/music_player.cc"
             "audio/demuxer/ogg_demuxer.cc"
             "audio/codecs/no_audio_codec.cc"
             "audio/codecs/box_audio_codec.cc"
@@ -30,6 +31,7 @@ set(SOURCES "audio/audio_codec.cc"
             "protocols/mqtt_protocol.cc"
             "protocols/websocket_protocol.cc"
             "mcp_server.cc"
+            "companion_cloud.cc"
             "system_info.cc"
             "application.cc"
             "ota.cc"
@@ -801,7 +803,12 @@ elseif(CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_CAM)
     set(BOARD_TYPE "bread-compact-wifi-s3cam")
     set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
     set(BUILTIN_ICON_FONT font_awesome_16_4)
-    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+    set(DEFAULT_EMOJI_COLLECTION kawaii_cat_160)
+elseif(CONFIG_BOARD_TYPE_LELIAN_MLR_S3_DRAFT)
+    set(BOARD_TYPE "lelian-mlr-s3-draft")
+    set(BUILTIN_TEXT_FONT font_puhui_basic_16_4)
+    set(BUILTIN_ICON_FONT font_awesome_16_4)
+    set(DEFAULT_EMOJI_COLLECTION kawaii_cat_160)
 elseif(CONFIG_BOARD_TYPE_JIUCHUAN)
     set(BOARD_TYPE "jiuchuan-s3")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)

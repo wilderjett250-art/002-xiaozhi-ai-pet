@@ -7,6 +7,7 @@
 #include <esp_timer.h>
 
 #include <string>
+#include <atomic>
 #include <mutex>
 #include <deque>
 #include <memory>
@@ -97,6 +98,7 @@ public:
      * Sends MAIN_EVENT_START_LISTENING to be handled in Run()
      */
     void StartListening();
+    void StartListening(ListeningMode mode);
 
     /**
      * Stop listening (event-based, thread-safe)
@@ -106,14 +108,17 @@ public:
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
-    bool UpgradeFirmware(const std::string& url, const std::string& version = "");
+    bool UpgradeFirmware(const std::string& url, const std::string& version = "",
+                         const std::string& expected_sha256 = "", bool reboot_on_success = true);
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void RegisterMcpBroadcastCallback(std::function<void(const std::string&)> callback);
+    void RegisterSttCallback(std::function<void(const std::string&)> callback);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
     AudioService& GetAudioService() { return audio_service_; }
+    void RefreshIdleAudioMode();
     
     /**
      * Reset protocol resources (thread-safe)
@@ -133,12 +138,14 @@ private:
     esp_timer_handle_t clock_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
+    std::atomic<ListeningMode> requested_listening_mode_{kListeningModeManualStop};
     AecMode aec_mode_ = kAecOff;
     std::string last_error_message_;
     AudioService audio_service_;
     std::unique_ptr<Ota> ota_;
 
     std::function<void(const std::string&)> mcp_broadcast_callback_;
+    std::function<void(const std::string&)> stt_callback_;
 
     bool has_server_time_ = false;
     bool aborted_ = false;

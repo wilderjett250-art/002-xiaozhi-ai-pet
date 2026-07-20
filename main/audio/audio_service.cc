@@ -37,6 +37,22 @@
 
 #define TAG "AudioService"
 
+namespace {
+constexpr size_t kAmbientPrerollFrames = 10;
+constexpr size_t kAmbientTrailingSilenceFrames = 13;
+constexpr size_t kAmbientMinTotalFrames = 14;
+constexpr size_t kAmbientMinSpeechFrames = 6;
+// Keep each Opus segment short so capture plus upload buffers fit in the S3's
+// limited internal heap. Continuous speech starts a new segment automatically.
+constexpr size_t kAmbientMaxFrames = 80;
+constexpr size_t kMaxAmbientSegments = 2;
+
+void AppendUint16Le(std::vector<uint8_t>& output, uint16_t value) {
+    output.push_back(static_cast<uint8_t>(value & 0xff));
+    output.push_back(static_cast<uint8_t>((value >> 8) & 0xff));
+}
+}  // namespace
+
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
 }
@@ -99,7 +115,10 @@ void AudioService::Initialize(AudioCodec* codec) {
 #endif
 
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
-        PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
+        const bool ambient = ambient_capture_enabled_.load();
+        PushTaskToEncodeQueue(
+            ambient ? kAudioTaskTypeEncodeToAmbientQueue : kAudioTaskTypeEncodeToSendQueue,
+            std::move(data), voice_detected_.load());
     });
 
     audio_processor_->OnVadStateChange([this](bool speaking) {
@@ -178,6 +197,9 @@ void AudioService::Stop() {
     audio_decode_queue_.clear();
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
+    ambient_preroll_.clear();
+    ambient_current_.clear();
+    ambient_audio_queue_.clear();
     audio_queue_cv_.notify_all();
 }
 
@@ -329,7 +351,9 @@ void AudioService::OpusCodecTask() {
         std::unique_lock<std::mutex> lock(audio_queue_mutex_);
         audio_queue_cv_.wait(lock, [this]() {
             return service_stopped_ ||
-                (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) ||
+                (!audio_encode_queue_.empty() &&
+                    (audio_encode_queue_.front()->type != kAudioTaskTypeEncodeToSendQueue ||
+                     audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE)) ||
                 (!audio_decode_queue_.empty() && audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE);
         });
         if (service_stopped_) {
@@ -392,7 +416,9 @@ void AudioService::OpusCodecTask() {
             debug_statistics_.decode_count++;
         }
         /* Encode the audio to send queue */
-        if (!audio_encode_queue_.empty() && audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE) {
+        if (!audio_encode_queue_.empty() &&
+            (audio_encode_queue_.front()->type != kAudioTaskTypeEncodeToSendQueue ||
+             audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE)) {
             auto task = std::move(audio_encode_queue_.front());
             audio_encode_queue_.pop_front();
             audio_queue_cv_.notify_all();
@@ -426,6 +452,8 @@ void AudioService::OpusCodecTask() {
                         if (callbacks_.on_send_queue_available) {
                             callbacks_.on_send_queue_available();
                         }
+                    } else if (task->type == kAudioTaskTypeEncodeToAmbientQueue) {
+                        PushAmbientPacket(std::move(packet->payload), task->voice_detected);
                     } else if (task->type == kAudioTaskTypeEncodeToTestingQueue) {
                         std::lock_guard<std::mutex> lock2(audio_queue_mutex_);
                         audio_testing_queue_.push_back(std::move(packet));
@@ -481,10 +509,12 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
     }
 }
 
-void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm) {
+void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm, bool voice_detected) {
     auto task = std::make_unique<AudioTask>();
     task->type = type;
     task->pcm = std::move(pcm);
+    task->timestamp = 0;
+    task->voice_detected = voice_detected;
     /* Push the task to the encode queue */
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
 
@@ -513,6 +543,143 @@ bool AudioService::PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> pa
         }
     }
     audio_decode_queue_.push_back(std::move(packet));
+    audio_queue_cv_.notify_all();
+    return true;
+}
+
+void AudioService::PushAmbientPacket(std::vector<uint8_t>&& packet, bool voice_detected) {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    if (!ambient_capture_enabled_.load() || packet.empty()) {
+        return;
+    }
+
+    if (!ambient_recording_) {
+        ambient_preroll_.push_back(std::move(packet));
+        while (ambient_preroll_.size() > kAmbientPrerollFrames) {
+            ambient_preroll_.pop_front();
+        }
+        if (!voice_detected) {
+            return;
+        }
+        ambient_recording_ = true;
+        ambient_speech_frames_ = 1;
+        ambient_silence_frames_ = 0;
+        ambient_current_.reserve(kAmbientMaxFrames);
+        while (!ambient_preroll_.empty()) {
+            ambient_current_.push_back(std::move(ambient_preroll_.front()));
+            ambient_preroll_.pop_front();
+        }
+        return;
+    }
+
+    ambient_current_.push_back(std::move(packet));
+    if (voice_detected) {
+        ambient_speech_frames_++;
+        ambient_silence_frames_ = 0;
+    } else {
+        ambient_silence_frames_++;
+    }
+    if (ambient_silence_frames_ >= static_cast<int>(kAmbientTrailingSilenceFrames) ||
+        ambient_current_.size() >= kAmbientMaxFrames) {
+        FinishAmbientSegmentLocked();
+    }
+}
+
+void AudioService::FinishAmbientSegmentLocked() {
+    if (ambient_current_.size() >= kAmbientMinTotalFrames &&
+        ambient_speech_frames_ >= static_cast<int>(kAmbientMinSpeechFrames)) {
+        auto segment = std::make_unique<AmbientAudioSegment>();
+        size_t payload_size = 10;
+        for (const auto& packet : ambient_current_) {
+            payload_size += 2 + packet.size();
+        }
+        segment->data.reserve(payload_size);
+        segment->data.insert(segment->data.end(), {'C', 'A', 'P', '1'});
+        AppendUint16Le(segment->data, 16000);
+        AppendUint16Le(segment->data, OPUS_FRAME_DURATION_MS);
+        AppendUint16Le(segment->data, static_cast<uint16_t>(ambient_current_.size()));
+        for (const auto& packet : ambient_current_) {
+            AppendUint16Le(segment->data, static_cast<uint16_t>(packet.size()));
+            segment->data.insert(segment->data.end(), packet.begin(), packet.end());
+        }
+        segment->duration_ms = static_cast<int>(ambient_current_.size()) * OPUS_FRAME_DURATION_MS;
+        if (ambient_audio_queue_.size() >= kMaxAmbientSegments) {
+            ambient_audio_queue_.pop_front();
+        }
+        ESP_LOGI(TAG, "Ambient speech segment ready: %d ms, %u bytes",
+                 segment->duration_ms, static_cast<unsigned>(segment->data.size()));
+        ambient_audio_queue_.push_back(std::move(segment));
+    }
+    ambient_recording_ = false;
+    ambient_speech_frames_ = 0;
+    ambient_silence_frames_ = 0;
+    ambient_current_.clear();
+    ambient_preroll_.clear();
+}
+
+void AudioService::EnableAmbientCapture(bool enable) {
+    const bool previous = ambient_capture_enabled_.exchange(enable);
+    if (previous == enable) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    ambient_recording_ = false;
+    ambient_speech_frames_ = 0;
+    ambient_silence_frames_ = 0;
+    ambient_current_.clear();
+    ambient_preroll_.clear();
+    ESP_LOGI(TAG, "%s ambient speech capture", enable ? "Enabling" : "Disabling");
+}
+
+bool AudioService::HasAmbientAudio() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    return !ambient_audio_queue_.empty();
+}
+
+std::unique_ptr<AmbientAudioSegment> AudioService::PopAmbientAudio() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    if (ambient_audio_queue_.empty()) {
+        return nullptr;
+    }
+    auto segment = std::move(ambient_audio_queue_.front());
+    ambient_audio_queue_.pop_front();
+    return segment;
+}
+
+void AudioService::RequeueAmbientAudio(std::unique_ptr<AmbientAudioSegment> segment) {
+    if (segment == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    if (ambient_audio_queue_.size() >= kMaxAmbientSegments) {
+        ambient_audio_queue_.pop_back();
+    }
+    ambient_audio_queue_.push_front(std::move(segment));
+}
+
+bool AudioService::PushPcmToPlaybackQueue(std::vector<int16_t>&& pcm, bool wait) {
+    if (pcm.empty()) {
+        return true;
+    }
+
+    auto task = std::make_unique<AudioTask>();
+    task->type = kAudioTaskTypeDecodeToPlaybackQueue;
+    task->timestamp = 0;
+    task->pcm = std::move(pcm);
+
+    std::unique_lock<std::mutex> lock(audio_queue_mutex_);
+    if (audio_playback_queue_.size() >= MAX_PLAYBACK_TASKS_IN_QUEUE) {
+        if (!wait) {
+            return false;
+        }
+        audio_queue_cv_.wait(lock, [this]() {
+            return service_stopped_ || audio_playback_queue_.size() < MAX_PLAYBACK_TASKS_IN_QUEUE;
+        });
+        if (service_stopped_) {
+            return false;
+        }
+    }
+    audio_playback_queue_.push_back(std::move(task));
     audio_queue_cv_.notify_all();
     return true;
 }
@@ -676,6 +843,12 @@ void AudioService::ResetDecoder() {
     audio_decode_queue_.clear();
     audio_playback_queue_.clear();
     audio_testing_queue_.clear();
+    audio_queue_cv_.notify_all();
+}
+
+void AudioService::ClearPlaybackQueue() {
+    std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+    audio_playback_queue_.clear();
     audio_queue_cv_.notify_all();
 }
 

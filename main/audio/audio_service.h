@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -85,6 +86,7 @@ struct AudioServiceCallbacks {
 
 enum AudioTaskType {
     kAudioTaskTypeEncodeToSendQueue,
+    kAudioTaskTypeEncodeToAmbientQueue,
     kAudioTaskTypeEncodeToTestingQueue,
     kAudioTaskTypeDecodeToPlaybackQueue,
 };
@@ -93,6 +95,13 @@ struct AudioTask {
     AudioTaskType type;
     std::vector<int16_t> pcm;
     uint32_t timestamp;
+    bool voice_detected = false;
+};
+
+struct AmbientAudioSegment {
+    std::vector<uint8_t> data;
+    int duration_ms = 0;
+    int attempts = 0;
 };
 
 struct DebugStatistics {
@@ -113,7 +122,7 @@ public:
     void EncodeWakeWord();
     std::unique_ptr<AudioStreamPacket> PopWakeWordPacket();
     const std::string& GetLastWakeWord() const;
-    bool IsVoiceDetected() const { return voice_detected_; }
+    bool IsVoiceDetected() const { return voice_detected_.load(); }
     bool IsIdle();
     void WaitForPlaybackQueueEmpty();
     bool IsWakeWordRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING; }
@@ -122,16 +131,24 @@ public:
 
     void EnableWakeWordDetection(bool enable);
     void EnableVoiceProcessing(bool enable);
+    void EnableAmbientCapture(bool enable);
+    bool IsAmbientCaptureEnabled() const { return ambient_capture_enabled_.load(); }
+    bool HasAmbientAudio();
+    std::unique_ptr<AmbientAudioSegment> PopAmbientAudio();
+    void RequeueAmbientAudio(std::unique_ptr<AmbientAudioSegment> segment);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
     bool PushPacketToDecodeQueue(std::unique_ptr<AudioStreamPacket> packet, bool wait = false);
+    bool PushPcmToPlaybackQueue(std::vector<int16_t>&& pcm, bool wait = false);
     std::unique_ptr<AudioStreamPacket> PopPacketFromSendQueue();
     void PlaySound(const std::string_view& sound);
     bool ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples);
     void ResetDecoder();
+    void ClearPlaybackQueue();
+    int GetOutputSampleRate() const { return codec_ == nullptr ? 0 : codec_->output_sample_rate(); }
     void SetModelsList(srmodel_list_t* models_list);
 
 private:
@@ -171,12 +188,19 @@ private:
     std::deque<std::unique_ptr<AudioStreamPacket>> audio_testing_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_encode_queue_;
     std::deque<std::unique_ptr<AudioTask>> audio_playback_queue_;
+    std::deque<std::vector<uint8_t>> ambient_preroll_;
+    std::vector<std::vector<uint8_t>> ambient_current_;
+    std::deque<std::unique_ptr<AmbientAudioSegment>> ambient_audio_queue_;
     // For server AEC
     std::deque<uint32_t> timestamp_queue_;
 
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
-    bool voice_detected_ = false;
+    std::atomic<bool> voice_detected_{false};
+    std::atomic<bool> ambient_capture_enabled_{false};
+    bool ambient_recording_ = false;
+    int ambient_speech_frames_ = 0;
+    int ambient_silence_frames_ = 0;
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
 
@@ -187,7 +211,9 @@ private:
     void AudioInputTask();
     void AudioOutputTask();
     void OpusCodecTask();
-    void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm);
+    void PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm, bool voice_detected = false);
+    void PushAmbientPacket(std::vector<uint8_t>&& packet, bool voice_detected);
+    void FinishAmbientSegmentLocked();
     void SetDecodeSampleRate(int sample_rate, int frame_duration);
     void CheckAndUpdateAudioPowerState();
 };

@@ -8,6 +8,7 @@
 #include <esp_app_desc.h>
 #include <algorithm>
 #include <cstring>
+#include <utility>
 #include <esp_pthread.h>
 
 #include "application.h"
@@ -17,6 +18,7 @@
 #include "settings.h"
 #include "lvgl_theme.h"
 #include "lvgl_display.h"
+#include "companion_cloud.h"
 
 #define TAG "MCP"
 
@@ -100,7 +102,7 @@ void McpServer::AddCommonTools() {
     auto camera = board.GetCamera();
     if (camera) {
         AddTool("self.camera.take_photo",
-            "Always remember you have a camera. If the user asks you to see something, use this tool to take a photo and then explain it.\n"
+            "Take and display a camera photo, then explain it. Use this tool whenever the user explicitly asks to take, show, view, display, or save a photo/image. When private cloud archive is enabled, every photo taken by this explicit user request is queued for cloud storage. Do not use it for automatic background observation.\n"
             "Args:\n"
             "  `question`: The question that you want to ask about the photo.\n"
             "Return:\n"
@@ -112,11 +114,26 @@ void McpServer::AddCommonTools() {
                 // Lower the priority to do the camera capture
                 TaskPriorityReset priority_reset(1);
 
-                if (!camera->Capture()) {
-                    throw std::runtime_error("Failed to capture photo");
-                }
                 auto question = properties["question"].value<std::string>();
-                return camera->Explain(question);
+                auto& cloud = CompanionCloud::GetInstance();
+                if (cloud.IsEnabled()) {
+                    CameraPhoto photo;
+                    if (!camera->CaptureAndGetJpeg(photo, 78, true)) {
+                        throw std::runtime_error("Failed to capture photo for cloud archive");
+                    }
+
+                    // Archive immediately. Image analysis may be slow or time out on 4G,
+                    // but that must not prevent an explicit user photo from being saved.
+                    if (!cloud.QueueVoicePhoto(std::move(photo), question, "")) {
+                        ESP_LOGE(TAG, "User-requested photo was displayed but could not be queued for archive");
+                        if (auto display = Board::GetInstance().GetDisplay(); display != nullptr) {
+                            display->ShowNotification("照片保存准备失败");
+                        }
+                    }
+                    return camera->Explain(question);
+                }
+                auto result = camera->CaptureAndExplain(question, true);
+                return result;
             });
     }
 #endif
@@ -151,15 +168,19 @@ void McpServer::AddUserOnlyTools() {
     // Firmware upgrade
     AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
         PropertyList({
-            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
+            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install"),
+            Property("version", kPropertyTypeString, std::string("")),
+            Property("sha256", kPropertyTypeString, std::string(""))
         }),
         [this](const PropertyList& properties) -> ReturnValue {
             auto url = properties["url"].value<std::string>();
+            auto version = properties["version"].value<std::string>();
+            auto sha256 = properties["sha256"].value<std::string>();
             ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
             
             auto& app = Application::GetInstance();
-            app.Schedule([url, &app]() {
-                bool success = app.UpgradeFirmware(url);
+            app.Schedule([url, version, sha256, &app]() {
+                bool success = app.UpgradeFirmware(url, version, sha256);
                 if (!success) {
                     ESP_LOGE(TAG, "Firmware upgrade failed");
                 }

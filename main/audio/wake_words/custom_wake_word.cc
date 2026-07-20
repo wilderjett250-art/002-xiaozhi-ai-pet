@@ -8,6 +8,7 @@
 #include <esp_mn_models.h>
 #include <esp_mn_speech_commands.h>
 #include <cJSON.h>
+#include <algorithm>
 
 #define TAG "CustomWakeWord"
 
@@ -31,6 +32,43 @@ CustomWakeWord::~CustomWakeWord() {
 
     if (models_ != nullptr) {
         esp_srmodel_deinit(models_);
+    }
+}
+
+void CustomWakeWord::AddCommandAliases(const char* command, const char* text, const char* action) {
+    if (command == nullptr || text == nullptr || action == nullptr) {
+        return;
+    }
+
+    auto split_and_trim = [](const std::string& value) {
+        std::vector<std::string> parts;
+        size_t start = 0;
+        while (start <= value.size()) {
+            const size_t end = value.find(',', start);
+            std::string part = value.substr(start, end == std::string::npos ? end : end - start);
+            const size_t first = part.find_first_not_of(" \t\r\n");
+            if (first != std::string::npos) {
+                const size_t last = part.find_last_not_of(" \t\r\n");
+                parts.push_back(part.substr(first, last - first + 1));
+            }
+            if (end == std::string::npos) {
+                break;
+            }
+            start = end + 1;
+        }
+        return parts;
+    };
+
+    const auto command_aliases = split_and_trim(command);
+    const auto display_aliases = split_and_trim(text);
+    for (size_t i = 0; i < command_aliases.size(); ++i) {
+        const std::string& alias = command_aliases[i];
+        const std::string display_text = display_aliases.empty()
+            ? std::string(text)
+            : (display_aliases.size() == command_aliases.size() ? display_aliases[i] : display_aliases.front());
+        commands_.push_back({alias, display_text, action});
+        ESP_LOGI(TAG, "Command alias: %s, Text: %s, Action: %s",
+            alias.c_str(), display_text.c_str(), action);
     }
 }
 
@@ -71,8 +109,7 @@ void CustomWakeWord::ParseWakenetModelConfig() {
                     cJSON* text = cJSON_GetObjectItem(command, "text");
                     cJSON* action = cJSON_GetObjectItem(command, "action");
                     if (cJSON_IsString(command_name) && cJSON_IsString(text) && cJSON_IsString(action)) {
-                        commands_.push_back({command_name->valuestring, text->valuestring, action->valuestring});
-                        ESP_LOGI(TAG, "Command: %s, Text: %s, Action: %s", command_name->valuestring, text->valuestring, action->valuestring);
+                        AddCommandAliases(command_name->valuestring, text->valuestring, action->valuestring);
                     }
                 }
             }
@@ -91,7 +128,7 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
         models_ = esp_srmodel_init("model");
 #ifdef CONFIG_CUSTOM_WAKE_WORD
         threshold_ = CONFIG_CUSTOM_WAKE_WORD_THRESHOLD / 100.0f;
-        commands_.push_back({CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake"});
+        AddCommandAliases(CONFIG_CUSTOM_WAKE_WORD, CONFIG_CUSTOM_WAKE_WORD_DISPLAY, "wake");
 #endif
     } else {
         models_ = models_list;
@@ -120,7 +157,11 @@ bool CustomWakeWord::Initialize(AudioCodec* codec, srmodel_list_t* models_list) 
     multinet_->set_det_threshold(multinet_model_data_, threshold_);
     esp_mn_commands_clear();
     for (int i = 0; i < commands_.size(); i++) {
-        esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        esp_err_t err = esp_mn_commands_add(i + 1, commands_[i].command.c_str());
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register command alias: %s", commands_[i].command.c_str());
+            return false;
+        }
     }
     esp_mn_commands_update();
     
@@ -171,19 +212,20 @@ void CustomWakeWord::Feed(const std::vector<int16_t>& data) {
         esp_mn_state_t mn_state = multinet_->detect(multinet_model_data_, chunk.data());
         
         if (mn_state == ESP_MN_STATE_DETECTED) {
-            esp_mn_results_t *mn_result = multinet_->get_results(multinet_model_data_);
-            for (int i = 0; i < mn_result->num && running_; i++) {
-                ESP_LOGI(TAG, "Custom wake word detected: command_id=%d, string=%s, prob=%f", 
-                        mn_result->command_id[i], mn_result->string, mn_result->prob[i]);
-                auto& command = commands_[mn_result->command_id[i] - 1];
-                if (command.action == "wake") {
-                    last_detected_wake_word_ = command.text;
-                    running_ = false;
-                    input_buffer_.clear();
-                    
-                    if (wake_word_detected_callback_) {
-                        wake_word_detected_callback_(last_detected_wake_word_);
-                    }
+            // Some ML307 camera builds intermittently crash inside the closed
+            // MultiNet get_results implementation after a valid detection.
+            // Every registered phrase in this detector is a wake alias, so the
+            // detected state itself is sufficient and avoids that unstable API.
+            auto command = std::find_if(commands_.begin(), commands_.end(),
+                [](const Command& item) { return item.action == "wake"; });
+            if (command != commands_.end()) {
+                ESP_LOGI(TAG, "Custom wake word detected");
+                last_detected_wake_word_ = command->text;
+                running_ = false;
+                input_buffer_.clear();
+
+                if (wake_word_detected_callback_) {
+                    wake_word_detected_callback_(last_detected_wake_word_);
                 }
             }
             multinet_->clean(multinet_model_data_);
