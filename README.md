@@ -1,44 +1,50 @@
-# Project 002 · XiaoZhi Cat AI Desktop Companion
+# 002 小智 AI 桌宠 | XiaoZhi AI Pet
 
-[中文说明](README_zh.md) | [English Documentation](README_en.md)
+> 让 ESP32-S3 设备拥有语音、表情、摄像头、网络连接和云端陪伴能力。
+>
+> **English:** A practical, runnable project with a documented workflow for the problem described above.
 
-## 中文
+## 项目展示 / Demo
 
-这是“100 个项目”计划中的第 **002** 个项目：一个基于 ESP32-S3 与 XiaoZhi ESP32 的猫形 AI 桌面伙伴。仓库包含设备固件、猫咪表情与语音交互、摄像头、ML307 Cat.1 4G / Wi-Fi 双网络，以及配套的 Companion Cloud 服务。
+![设备与云端流程](docs/mcp-based-graph.jpg)
 
-主要能力：
+## 解决什么问题 / Problem
 
-- “嗨喵喵 / 小喵小喵 / 你好小智”离线唤醒与流式语音对话
-- 240 × 240 ST7789 显示、猫咪表情、音乐与主动问候
-- OV3660 摄像头、设备状态遥测、OTA 与启动自检
-- ML307 Cat.1 4G 主链路和 Wi-Fi 备用链路
-- Companion Cloud 设备 API、Web 控制台、提醒与环境感知服务
+解决硬件设备只有单一交互入口的问题，把唤醒、对话、表情、遥测和云端控制整合到一个桌面伙伴中。
 
-完整的硬件说明、构建方法、云端部署和验证边界请阅读 [README_zh.md](README_zh.md)。
+**English:** This project addresses the problem above with a reproducible local workflow.
 
-## English
+## 有什么用 / Use
 
-This is project **002** in the “100 Projects” series: a cat-shaped AI desktop companion built on ESP32-S3 and XiaoZhi ESP32. The repository contains device firmware, cat expressions and voice interaction, camera support, ML307 Cat.1 4G / Wi-Fi dual networking, and the Companion Cloud service.
+刷入固件后可进行语音对话、屏幕表情展示、设备状态上报、OTA 更新和 Companion Cloud 控制。
 
-Highlights:
+**English:** Run the workflow locally, inspect the output, and extend the project from the provided source.
 
-- Offline wake phrases and streaming voice conversation
-- 240 × 240 ST7789 display, cat expressions, music, and proactive greetings
-- OV3660 camera, device telemetry, OTA, and boot self-test
-- ML307 Cat.1 4G primary link with Wi-Fi fallback
-- Companion Cloud device APIs, web console, reminders, and ambient awareness
+## 高光亮点 / Highlights
 
-See [README_en.md](README_en.md) for hardware notes, build steps, cloud deployment, and validation scope.
+- ESP32-S3 固件与多板卡适配
+- 离线唤醒、流式语音和猫咪表情
+- ML307 Cat.1 4G + Wi-Fi 双网络
+- Companion Cloud API、Web 控制台、提醒与环境感知
 
-## Repository Layout
+## 技术名词 / Tech
 
-```text
-main/                ESP32 firmware and board implementations
-main/assets/         Audio and cat-expression assets
-companion-cloud/     Companion Cloud service, web UI, and tests
-partitions/          Flash partition layouts
-scripts/             Firmware build and asset tools
-docs/                Upstream XiaoZhi protocol and hardware documentation
-```
+`ESP-IDF · ESP32-S3 · C/C++ · MQTT/WebSocket · Python · Cloud API`
 
-This project keeps the upstream MIT license. See [LICENSE](LICENSE).
+## 从 ZIP 开始复现 / Reproduce from ZIP
+
+1. 下载 ZIP 并解压，安装 ESP-IDF 和对应工具链。
+2. 按 docs/custom-board_zh.md 选择开发板和 sdkconfig。
+3. 进入仓库根目录执行 idf.py set-target esp32s3。
+4. 执行 idf.py build、idf.py flash monitor。
+5. Companion Cloud 进入 companion-cloud，按其 README 安装依赖并配置环境变量。
+
+**Expected result:** 设备启动后显示表情并进入语音交互；云端服务运行后可在控制台查看设备和提醒。
+
+## 目录提示 / Notes
+
+- 先阅读本 README，再按项目内更详细的中文/英文文档补充配置。
+- 不要把真实密码、Token、数据库业务数据和本机运行结果提交回仓库。
+- 下载 ZIP 后的第一次运行应使用测试数据或示例图片，确认链路正常后再接入自己的环境。
+
+[English documentation](README.en.md)
