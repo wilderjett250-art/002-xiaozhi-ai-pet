@@ -10,6 +10,7 @@
 #include <esp_log.h>
 #include <esp_timer.h>
 
+#include "sdkconfig.h"
 #include "application.h"
 #include "assets/lang_config.h"
 #include "board.h"
