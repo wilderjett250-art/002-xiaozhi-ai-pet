@@ -14,7 +14,9 @@
 #include "assets/lang_config.h"
 #include "board.h"
 #include "display.h"
+#if !CONFIG_IDF_TARGET_ESP32
 #include "dual_network_board.h"
+#endif
 #include "mcp_server.h"
 #include "music_player.h"
 #include "settings.h"
@@ -39,10 +41,14 @@ constexpr int kMaxPhotoUploadAttempts = 5;
 constexpr int kMaxAmbientUploadAttempts = 3;
 
 void ReportCloudReachability(bool success) {
+#if CONFIG_IDF_TARGET_ESP32
+    (void)success;
+#else
     auto* dual_board = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
     if (dual_board != nullptr) {
         dual_board->ReportInternetAccessResult(success);
     }
+#endif
 }
 
 bool IsSafeGatewayAction(const std::string& action) {
@@ -285,9 +291,12 @@ bool CompanionCloud::SendHeartbeat() {
     auto root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "name", device_name_.c_str());
     cJSON_AddStringToObject(root, "firmware", SystemInfo::GetUserAgent().c_str());
+    const char* network = "wifi";
+#if !CONFIG_IDF_TARGET_ESP32
     auto dual_board = dynamic_cast<DualNetworkBoard*>(&Board::GetInstance());
-    const char* network = dual_board != nullptr && dual_board->GetNetworkType() == NetworkType::ML307
+    network = dual_board != nullptr && dual_board->GetNetworkType() == NetworkType::ML307
         ? "4g" : "wifi";
+#endif
     cJSON_AddStringToObject(root, "network", network);
     if (dual_board != nullptr) {
         cJSON_AddStringToObject(root, "network_primary", "4g");
