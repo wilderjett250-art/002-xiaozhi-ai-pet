@@ -47,9 +47,7 @@ set(INCLUDE_DIRS "." "display" "display/lvgl_display" "display/lvgl_display/jpg"
 list(APPEND SOURCES
     "boards/common/board.cc"
     "boards/common/wifi_board.cc"
-    "boards/common/ml307_board.cc"
     "boards/common/nt26_board.cc"
-    "boards/common/dual_network_board.cc"
     "boards/common/adc_battery_monitor.cc"
     "boards/common/afsk_demod.cc"
     "boards/common/axp2101.cc"
@@ -63,6 +61,16 @@ list(APPEND SOURCES
     "boards/common/sy6970.cc"
     "boards/common/system_reset.cc"
 )
+
+# The ML307/UHCI stack is only available on targets that provide the UHCI
+# driver. Plain ESP32 boards in this project use Wi-Fi-only board classes;
+# do not compile the modem bridge into those targets.
+if(NOT CONFIG_IDF_TARGET_ESP32)
+    list(APPEND SOURCES
+        "boards/common/ml307_board.cc"
+        "boards/common/dual_network_board.cc"
+    )
+endif()
 if(CONFIG_XIAOZHI_USE_ETHERNET)
     list(APPEND SOURCES "boards/common/ethernet_board.cc")
 endif()
